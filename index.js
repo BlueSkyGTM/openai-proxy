@@ -52,6 +52,21 @@ const authMiddleware = (req, res, next) => {
   next();
 };
 
+// Z.ai rejects OpenAI-specific params it doesn't support.
+// Keep only the params GLM accepts; strip everything else.
+const ZAI_ALLOWED = new Set([
+  'model','messages','temperature','max_tokens','top_p','stream',
+  'stop','n','user','tools','tool_choice','response_format',
+]);
+function sanitizeBody(body) {
+  if (!BASE_URL.includes('bigmodel')) return body; // pass-through for OpenAI
+  const clean = {};
+  for (const [k, v] of Object.entries(body)) {
+    if (ZAI_ALLOWED.has(k)) clean[k] = v;
+  }
+  return clean;
+}
+
 async function proxyRequest(endpoint, req, res) {
   console.log(`Received request to ${endpoint}`);
   try {
@@ -60,7 +75,7 @@ async function proxyRequest(endpoint, req, res) {
       'Content-Type': 'application/json',
     };
 
-    const requestBody = req.body;
+    const requestBody = sanitizeBody(req.body);
     const isStreaming = requestBody.stream === true;
 
     const upstreamResponse = await axios({
