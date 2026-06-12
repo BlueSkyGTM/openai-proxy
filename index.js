@@ -9,6 +9,7 @@
 
 const express = require('express');
 const axios = require('axios');
+const crypto = require('crypto');
 require('dotenv').config();
 
 const app = express();
@@ -23,6 +24,20 @@ const HOST = '0.0.0.0';
 const BASE_URL = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
 const UPSTREAM_API_KEY = process.env.OPENAI_API_KEY;
 const PROXY_SECRET_KEY = process.env.PROXY_SECRET_KEY;
+
+// Z.ai keys are "id.secret" and require a signed HS256 JWT.
+// Standard OpenAI keys (sk-...) are passed as-is.
+function getUpstreamAuthHeader() {
+  if (!UPSTREAM_API_KEY || !UPSTREAM_API_KEY.includes('.')) {
+    return `Bearer ${UPSTREAM_API_KEY}`;
+  }
+  const [id, secret] = UPSTREAM_API_KEY.split('.');
+  const now = Math.floor(Date.now() / 1000);
+  const header = Buffer.from(JSON.stringify({ alg: 'HS256', sign_type: 'SIGN' })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ api_key: id, exp: now + 3600, timestamp: now })).toString('base64url');
+  const sig = crypto.createHmac('sha256', secret).update(`${header}.${payload}`).digest('base64url');
+  return `Bearer ${header}.${payload}.${sig}`;
+}
 
 const authMiddleware = (req, res, next) => {
   // Accept both x-proxy-auth (legacy) and Authorization: Bearer (OpenAI SDK standard)
@@ -41,7 +56,7 @@ async function proxyRequest(endpoint, req, res) {
   console.log(`Received request to ${endpoint}`);
   try {
     const headers = {
-      'Authorization': `Bearer ${UPSTREAM_API_KEY}`,
+      'Authorization': getUpstreamAuthHeader(),
       'Content-Type': 'application/json',
     };
 
